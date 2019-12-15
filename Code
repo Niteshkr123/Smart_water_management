@@ -1,0 +1,193 @@
+#include <Wire.h> 
+#include <LiquidCrystal_I2C.h>
+#define BLYNK_PRINT Serial
+#include <BlynkSimpleEsp8266.h>
+#include<ESP8266HTTPClient.h>
+#include <ESP8266WiFi.h>
+
+#define SensorPin A0 
+unsigned long int avgValue;  //Store the average value of the sensor feedback
+float b;
+int buf[10],temp;
+
+int clk=13;
+int aclk=15;
+
+int flag;
+
+LiquidCrystal_I2C lcd(0x27,20,4);  // set the LCD address to 0x27 for a 16 chars and 2 line display
+
+// defines pins numbers
+const int trigPin = 2;  //D4
+const int echoPin = 0;  //D3
+
+// defines variables
+long duration;
+int height;
+
+char auth[] = "     ";    ///Paste ur API key here of Blynk
+String apiKey= "    ";     /////////Paste ur things speak API key
+// Your WiFi credentials.
+// Set password to "" for open networks.
+char ssid[] = "Nitesh";
+char pass[] = "********";
+
+void setup()
+{
+  flag=1;
+  pinMode(clk,OUTPUT);
+  pinMode(aclk,OUTPUT);
+  pinMode(12,INPUT);
+  pinMode(A0,OUTPUT);   
+  lcd.init();                      // initialize the lcd 
+  // Print a message to the LCD.
+  lcd.backlight();
+  lcd.setCursor(0,0);
+  lcd.print("Smart Rainwater ");
+  lcd.setCursor(1,1);
+  lcd.print(" Management ");
+  delay(2000);
+  lcd.clear();
+  pinMode(trigPin, OUTPUT); // Sets the trigPin as an Output
+  pinMode(echoPin, INPUT); // Sets the echoPin as an Input
+  Serial.begin(9600); // Starts the serial communication
+  Blynk.begin(auth, ssid, pass);
+}
+
+void loop() 
+{
+    Blynk.run();
+  
+  for(int i=0;i<10;i++)       //Get 10 sample value from the sensor for smooth the value
+  { 
+    buf[i]=analogRead(SensorPin);
+    delay(10);
+  }
+  for(int i=0;i<9;i++)        //sort the analog from small to large
+  {
+    for(int j=i+1;j<10;j++)
+    {
+      if(buf[i]>buf[j])
+      {
+        temp=buf[i];
+        buf[i]=buf[j];
+        buf[j]=temp;
+      }
+    }
+  }
+  avgValue=0;
+  for(int i=2;i<8;i++)                      //take the average value of 6 center sample
+    avgValue+=buf[i];
+  float phValue=(float)avgValue*5.0/1024/6; //convert the analog into millivolt
+  phValue=3.5*phValue/7.5;
+  float pH=phValue+5.2;
+  digitalWrite(A0, HIGH);       
+  delay(800);
+  digitalWrite(A0, LOW); 
+  Serial.print("pH =");
+  Serial.print(pH);
+  Serial.println(" ");
+  
+  // Clears the trigPin
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+
+  // Sets the trigPin on HIGH state for 10 micro seconds
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+
+  // Reads the echoPin, returns the sound wave travel time in microseconds
+  duration = pulseIn(echoPin, HIGH);
+
+  // Calculating the distance
+  height= duration*0.034/2;
+
+  //Serial.print(" Height: ");
+  //Serial.println(height);
+
+  float volume=(2*3.14*5.75*5.75*(19-height))/1000;
+
+  int a=digitalRead(12);
+  
+  Serial.print("Volume=");
+  Serial.print(volume);
+  Serial.println(" ");
+  lcd.setCursor(1,0);
+  lcd.print("Volume=");
+  lcd.setCursor(8,0);
+  lcd.print(volume);
+  lcd.setCursor(14,0);
+  lcd.print("L");
+
+  lcd.setCursor(1,1);
+  lcd.print(" ph = ");
+  lcd.setCursor(8,1);
+  lcd.print(pH);  
+  delay(1000);
+  lcd.clear();
+  
+  //int b=digitalRead(12);
+  
+  lcd.setCursor(1,0);
+  lcd.print("  Water is ");
+  
+  if(a==1)
+  {
+    lcd.setCursor(1,1);
+    lcd.print("   Polluted ");
+    if(flag==0)
+    {
+     digitalWrite(clk,0);
+     digitalWrite(aclk,1);     //valve closed
+     Serial.println("Valve Closed ");
+     Serial.println(" ");
+     delay(401);
+     digitalWrite(clk,0);
+     digitalWrite(aclk,0);
+     delay(400);
+     
+    }
+    flag=1;
+  }
+  else
+  {
+    lcd.setCursor(1,1);
+    lcd.print("Pure");
+    if(flag==1)
+    {
+     digitalWrite(clk,1);
+     digitalWrite(aclk,0);       //valve opened
+     Serial.println("Valve opened ");
+     Serial.println(" ");
+     delay(400);
+     digitalWrite(clk,0);
+     digitalWrite(aclk,0);
+     delay(400);
+    }
+    flag=0;
+  }
+ 
+  delay(1000);
+  lcd.clear();
+
+  if(WiFi.status()==WL_CONNECTED)
+ {
+  HTTPClient http;       //declare an object of class
+    String url="http://api.thingspeak.com/update?api_key=" + apiKey +"&field1=" + String(volume)+"&field2=" + String(a)+"&field3=" + String(pH);
+    Serial.println(url.c_str());     /// to convert c type  string
+    http.begin(url);
+    int httpCode=http.GET();
+    if(httpCode>0)
+  {
+    String payload=http.getString();
+    Serial.println(payload);
+  }
+    http.end();
+ }
+  //Serial.println("Waiting");
+  delay(500);
+   Blynk.virtualWrite(V5,a);
+  Blynk.virtualWrite(V6,volume);
+  Blynk.virtualWrite(V7,pH); 
+}
